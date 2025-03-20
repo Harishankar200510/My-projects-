@@ -1,14 +1,6 @@
-The file handling program performs two basic file operation in it create and delete a file.
-As per the given condition the program need to get base_path as input from user and need to perform the file operations.
-To store the logging of the file operation we are saving it in the file_operations.log .
-we need to configure the logging first.
-To save the logging we need to create a function def log() in which the logging are stored in file_operations.log.
-Then two function are implemented for file operations.
-def create() for file creation and def delete() for file deletion.
-In def create function the file is opened in the write mode and writes this is a new file.Then the log() function is called to store the logging details.The print statement print the output.Also we use give a exception in which when there is error in creating the exception block executes.
-In def delete function the created file is removed form the location and the print statement prints the output once the file is deleted.
-The main() function gets the base path as input from the user.If the path dose not exists the print statement prints the path(base path) dose not exist.
-At last theh two functions are called and the program is executed.
-
-
- 
+The program file_handling2 will read contents of two file and then merges into a single file.To accomplish this task i used function.
+To read contents from the files the read function is used which opens the fiels in with open method in read mode then reads the contents.Also throws exceptions when the files didn't exsits.
+To write the contents from the two file into a separate file write method is used a new file named merge.txt is created and the contents are written in it the file is also open using with open function which is used because there is no need to manually close the files onces opened.
+Then the read functions are called the contents from the files are read till the end.
+The write function writes the content in a single separate file.
+Once the program is successfully executed it prints "content from both the files are updated in megered.text file" if there is any error in the program the program prints"error reading files".
