@@ -1,3 +1,10 @@
+The program uses (Caesar Cipher) to  perform the encryption and decryption.We need to encrypt each and every single charater in the file so we use a for loop to itrate between each character.And stores the encrypted text in the new list which is encrypted_text.The first if statement checks the character is alphabet or not if the character is alphabet then the encryption part is performed else there is no need to perform the encryption part.As same as encryption part the decryption part also works.
+
+
+
+
+
+
 The file_handling3 program is used to remove empty lines from the given input file.And writes the content without any empty lines in a separate output.txt.To filter out all the empty line i used strip[] function which is used to remove whitespace and empty lines from the file.To check all the lines in a file i use for loop for iteration of the lines and used strip with if condition to check if there are any empty lines present in it and write the content in another file named as output.txt.Once the program is excuted successfully it prints "empty lines are removed from the file".
 
 
