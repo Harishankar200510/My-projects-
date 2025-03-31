@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload PDF</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        .progress-container {
+            width: 50%;
+            margin: 20px auto;
+            background: #eee;
+            border-radius: 10px;
+            padding: 5px;
+            box-shadow: 0px 0px 5px #ccc;
+        }
+        .progress-bar {
+            height: 25px;
+            width: 0%;
+            background: green;
+            border-radius: 10px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            line-height: 25px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Upload a PDF File</h2>
+    
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Upload</button>
+    </form>
+
+    <div class="progress-container">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+
+    <p id="statusMessage">Waiting for file upload...</p>
+
+    <script>
+        var socket = io.connect("http://127.0.0.1:5000"); // Connect WebSocket to Flask server
+        
+        socket.on("progress", function (data) {
+            var progress = data.percentage;
+            var progressBar = document.getElementById("progressBar");
+            progressBar.style.width = progress + "%";
+            progressBar.innerText = progress + "%";
+
+            if (progress < 100) {
+                document.getElementById("statusMessage").innerText = "Processing... " + progress + "% completed.";
+            } else {
+                document.getElementById("statusMessage").innerText = "✅ File processing completed!";
+            }
+        });
+    </script>
+
+</body>
+</html>
