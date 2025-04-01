@@ -1,16 +1,34 @@
 import os
 import json
-import certifi
-import pathlib
 import io
 import threading
 import fitz  # PyMuPDF for PDF text extraction
 from datetime import datetime
-from flask import Flask, request, render_template, redirect, url_for, flash
+from flask import Flask, request, render_template, jsonify
 from flask_socketio import SocketIO
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import google.generativeai as genai
+
+# Load environment variables
+load_dotenv()
+
+# Flask Configuration
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
+UPLOAD_FOLDER = 'uploads'
+KNOWLEDGE_STORAGE_FOLDER = 'knowledge_storage'
+ALLOWED_EXTENSIONS = {'pdf', 'txt'}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(KNOWLEDGE_STORAGE_FOLDER, exist_ok=True)
+
+# Enable WebSocket
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# Configure Google Gemini API
+genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+model = genai.GenerativeModel('gemini-1.5-flash')
+
 class PDFKnowledge:
     def __init__(self, summary="", key_topics=None, action_items=None, entities=None):
         self.summary = summary
@@ -26,34 +44,14 @@ class PDFKnowledge:
             "entities": self.entities,
         }
 
+# Send real-time progress per file
+def send_progress(file_id, filename, percent, status="Processing"):
+    socketio.emit('progress', {'file_id': file_id, 'filename': filename, 'percentage': percent, 'status': status})
+    socketio.sleep(1)
 
-# Load environment variables
-load_dotenv()
-
-# Flask Configuration
-app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
-UPLOAD_FOLDER = 'uploads'
-KNOWLEDGE_STORAGE_FOLDER = 'knowledge_storage'
-ALLOWED_EXTENSIONS = {'pdf', 'txt'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(KNOWLEDGE_STORAGE_FOLDER, exist_ok=True)
-
-# Enable WebSocket
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
-
-# Configure Google Gemini API
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not set in the environment variables.")
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
-# Send real-time progress
-def send_progress(percent):
-    socketio.emit('progress', {'percentage': percent})
-    socketio.sleep(1)  # Ensure immediate update
+# Check allowed file types
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # Extract text from PDF
 def extract_text_from_pdf(pdf_path):
@@ -66,17 +64,14 @@ def extract_text_from_pdf(pdf_path):
         print(f"❌ Error extracting text: {e}")
     return text.strip()
 
-# Process document with Gemini
 # Extract knowledge from PDF
-def extract_knowledge_from_pdf(pdf_data: bytes, filename: str, file_id: str):
+def extract_knowledge_from_pdf(pdf_data, filename, file_id):
     try:
-        send_progress(10)  # Step 1: Uploading file
+        send_progress(file_id, filename, 10)  # Uploading file
         file_stream = io.BytesIO(pdf_data)
         file_part = genai.upload_file(file_stream, mime_type="application/pdf")
-        
-        send_progress(30)  # Step 2: File uploaded successfully
+        send_progress(file_id, filename, 30)  # File uploaded
 
-        # Define AI prompt for extraction
         prompt = """Analyze the document and provide a structured JSON output:
         {
             "summary": "A brief summary of the document",
@@ -85,96 +80,66 @@ def extract_knowledge_from_pdf(pdf_data: bytes, filename: str, file_id: str):
             "entities": {"People": ["Name1"], "Organizations": ["Org1"]}
         }
         """
-        
-        send_progress(50)  # Step 3: AI processing started
+        send_progress(file_id, filename, 50)  # AI processing started
         response = model.generate_content([prompt, file_part])
-
-        send_progress(70)  # Step 4: AI processing completed
+        send_progress(file_id, filename, 70)  # AI processing completed
 
         if not response or not response.text:
             raise ValueError("Empty response from Gemini API")
 
         response_text = response.text.strip().replace('```json', '').replace('```', '').strip()
-        
         try:
             knowledge_data = json.loads(response_text)
         except json.JSONDecodeError:
             raise ValueError(f"Invalid JSON response: {response_text}")
 
-        send_progress(80)  # Step 5: Parsing response
-
+        send_progress(file_id, filename, 80)  # Parsing response
         knowledge = PDFKnowledge(**knowledge_data)
         json_file_path = save_knowledge_to_file(knowledge, file_id, filename)
+        send_progress(file_id, filename, 100, status="Completed")  # Extraction completed
 
-        send_progress(100)  # Step 6: Extraction completed
-
+        # Inform the frontend to remove the file from UI after completion
+        socketio.emit('completed', {'file_id': file_id, 'filename': filename})
         return json_file_path
     except Exception as e:
         print(f"❌ Error processing document: {e}")
-        send_progress(100)  # Ensure progress completes even on failure
+        send_progress(file_id, filename, 100, status="Failed")
         return None
 
-
-
-# Save knowledge to file
-# Save knowledge to file
+# Save extracted knowledge to file
 def save_knowledge_to_file(knowledge_data, file_id, filename):
     json_filename = f"knowledge_{file_id}_{secure_filename(filename)}.json"
     file_path = os.path.join(KNOWLEDGE_STORAGE_FOLDER, json_filename)
-
     try:
-        # Convert PDFKnowledge object to dictionary
         with open(file_path, "w", encoding="utf-8") as json_file:
-            json.dump(knowledge_data.to_dict(), json_file, indent=4)  # Convert before saving
-
+            json.dump(knowledge_data.to_dict(), json_file, indent=4)
         print(f"✅ Knowledge saved to {file_path}")
         return file_path
     except Exception as e:
         print(f"❌ Error saving knowledge: {e}")
         return None
 
-    # Define allowed file extensions
-ALLOWED_EXTENSIONS = {'pdf', 'txt'}
-# Function to check if file type is allowed
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-    # File Type Validation
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-# File Upload Route
+# Handle multiple file uploads
 @app.route('/upload', methods=['POST'])
-def upload_file():
-    file = request.files.get('file')
-    if not file or file.filename == '':
-        flash("No selected file")
-        return redirect(request.url)
+def upload_files():
+    files = request.files.getlist('files')
+    if not files or all(f.filename == '' for f in files):
+        return jsonify({"error": "No files selected"}), 400
 
-    if allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
-        send_progress(10)  # File upload started
-        file.save(file_path)
-
-        send_progress(30)  # File uploaded
-
-        # Read the file in binary mode
-        with open(file_path, "rb") as f:
-            pdf_data = f.read()  # Read as bytes
-        
-        file_id = str(datetime.now().timestamp())  # Unique file ID
-        
-        # Start extraction in a separate thread
-        threading.Thread(target=extract_knowledge_from_pdf, args=(pdf_data, filename, file_id)).start()
-
-        flash("File uploaded successfully. Knowledge extraction in progress!")
-        return redirect(url_for('index'))
-    
-    flash("Invalid file type")
-    return redirect(request.url)
+    responses = []
+    for file in files:
+        if allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file_id = str(datetime.now().timestamp())
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+            with open(file_path, "rb") as f:
+                pdf_data = f.read()
+            threading.Thread(target=extract_knowledge_from_pdf, args=(pdf_data, filename, file_id)).start()
+            responses.append({"file_id": file_id, "filename": filename, "status": "Processing"})
+        else:
+            responses.append({"filename": file.filename, "error": "Invalid file type"})
+    return jsonify(responses)
 
 @app.route('/')
 def index():
